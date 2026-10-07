@@ -1,0 +1,6 @@
+{
+  "name": "Ad Revenue Batch Autoplayer",
+  "description": "Auto-plays video ads in batches of 10, calculates real-time impression revenue and CPM earnings, and manages publisher account balances with compliance monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
