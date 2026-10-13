@@ -43,7 +43,7 @@ export interface BatchProgress {
   progressPercent: number; // 0 - 100
   batchEarned: number;
   completedInCurrentBatch: number;
-  status: 'idle' | 'playing' | 'paused' | 'batch_completed' | 'intermission';
+  status: 'idle' | 'playing' | 'paused' | 'survey' | 'batch_completed' | 'intermission';
 }
 
 export interface AccountProfile {
@@ -79,4 +79,22 @@ export interface AdBeaconLog {
   adNumberInBatch: number;
   revenueDelta: number;
   status: 'verified' | 'pending';
+}
+
+export interface SurveyAnswers {
+  question1: string; // "How did you find this ad?"
+  question2: string; // "Would you buy this product?"
+  question3: string; // "How relevant was it to you?"
+}
+
+export interface SurveyResponse {
+  id: string;
+  adId: string;
+  adBrand: string;
+  adHeadline: string;
+  category: string;
+  answers: SurveyAnswers;
+  timestamp: number;
+  creditedAmount: number;
+  accountEmail: string;
 }

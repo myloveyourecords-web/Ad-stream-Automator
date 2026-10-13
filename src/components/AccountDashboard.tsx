@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react';
-import { AccountProfile, Transaction, ThemeMode } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { AccountProfile, Transaction, ThemeMode, SurveyResponse } from '../types';
+import { surveyService } from '../services/surveyService';
 import { 
   Wallet, DollarSign, CheckCircle2, 
-  Send, CreditCard, Building, Coins, Download, Edit3, LineChart as ChartIcon
+  Send, CreditCard, Building, Coins, Download, Edit3, 
+  LineChart as ChartIcon, FileText, CheckSquare
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import confetti from 'canvas-confetti';
@@ -30,7 +32,34 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({
   const [payoutAmount, setPayoutAmount] = useState(profile.currentBalance > 0 ? profile.currentBalance.toFixed(2) : '10.00');
   const [payoutSuccess, setPayoutSuccess] = useState<string | null>(null);
 
+  // Active sub-tab: 'transactions' or 'surveys'
+  const [activeTab, setActiveTab] = useState<'transactions' | 'surveys'>('transactions');
+  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
+
   const isDark = theme === 'dark';
+
+  // Load survey responses from surveyService
+  const loadSurveys = async () => {
+    try {
+      const data = await surveyService.getSurveyResponses();
+      setSurveyResponses(data);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadSurveys();
+
+    // Listen for custom survey-saved event
+    const handleSurveySaved = () => {
+      loadSurveys();
+    };
+    window.addEventListener('adstream:survey-saved', handleSurveySaved);
+    return () => {
+      window.removeEventListener('adstream:survey-saved', handleSurveySaved);
+    };
+  }, []);
 
   // Compute cumulative earnings timeline for chart
   const chartData = useMemo(() => {
@@ -90,6 +119,17 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute("download", `ad-revenue-ledger-${profile.accountEmail}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleExportSurveys = async () => {
+    const json = await surveyService.exportJSON();
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(json);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `survey-responses-${profile.accountEmail}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -231,18 +271,18 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({
           </div>
         </div>
 
-        {/* Average eCPM */}
+        {/* Surveys Stored */}
         <div className={`p-4 rounded-2xl border ${
           isDark ? 'bg-slate-950/60 border-slate-800/90' : 'bg-slate-50 border-slate-200'
         }`}>
           <div className={`text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Effective eCPM
+            Surveys Saved
           </div>
           <div className="text-2xl font-bold font-mono text-purple-500">
-            ${profile.averageECPM.toFixed(2)}
+            {surveyResponses.length}
           </div>
           <div className={`text-[11px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-            Avg per 1,000 impressions
+            Local storage verified
           </div>
         </div>
       </div>
@@ -261,7 +301,7 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({
                 Earnings Over Time
               </h4>
               <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Cumulative balance accrual across 10-ad batch completions
+                Cumulative balance accrual across 5s ad views & verified survey completions
               </p>
             </div>
           </div>
@@ -329,69 +369,169 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({
         </div>
       </div>
 
-      {/* Transaction & Audit Ledger */}
+      {/* Tabs: Transaction Ledger VS Survey Responses */}
       <div className={`pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h4 className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            Ledger & Verified Batches
-          </h4>
-          <button
-            id="export-ledger-btn"
-            onClick={handleExportLedger}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
-              isDark 
-                ? 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 border-slate-700' 
-                : 'text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border-slate-300'
-            }`}
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export JSON</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              id="tab-transactions"
+              type="button"
+              onClick={() => setActiveTab('transactions')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                activeTab === 'transactions'
+                  ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                  : isDark
+                  ? 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-white'
+                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Revenue Ledger</span>
+            </button>
+
+            <button
+              id="tab-surveys"
+              type="button"
+              onClick={() => setActiveTab('surveys')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                activeTab === 'surveys'
+                  ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                  : isDark
+                  ? 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-white'
+                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-slate-900'
+              }`}
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span>Saved Surveys ({surveyResponses.length})</span>
+            </button>
+          </div>
+
+          <div>
+            {activeTab === 'transactions' ? (
+              <button
+                id="export-ledger-btn"
+                onClick={handleExportLedger}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
+                  isDark 
+                    ? 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 border-slate-700' 
+                    : 'text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border-slate-300'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Ledger JSON</span>
+              </button>
+            ) : (
+              <button
+                id="export-surveys-btn"
+                onClick={handleExportSurveys}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
+                  isDark 
+                    ? 'text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 border-slate-700' 
+                    : 'text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border-slate-300'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Surveys JSON</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Table of Ledger Transactions */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className={`border-b ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                <th className="pb-2 font-medium">Type</th>
-                <th className="pb-2 font-medium">Batch / Reference</th>
-                <th className="pb-2 font-medium">Time</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
-              {transactions.slice(0, 6).map((tx) => (
-                <tr key={tx.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/30 text-slate-300' : 'hover:bg-slate-50 text-slate-700'}`}>
-                  <td className="py-2.5">
-                    <span className={`inline-flex items-center gap-1 font-medium ${
-                      tx.type === 'batch_revenue' ? 'text-emerald-500' : tx.type === 'payout' ? 'text-blue-500' : 'text-amber-500'
-                    }`}>
-                      {tx.type === 'batch_revenue' ? 'Batch Revenue' : tx.type === 'payout' ? 'Payout Sent' : 'Bonus'}
-                    </span>
-                  </td>
-                  <td className={`py-2.5 font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {tx.batchNumber ? `Batch #${tx.batchNumber} (10 Ads)` : tx.referenceCode}
-                  </td>
-                  <td className={`py-2.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </td>
-                  <td className="py-2.5">
-                    <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                      {tx.status}
-                    </span>
-                  </td>
-                  <td className={`py-2.5 font-mono font-semibold text-right ${
-                    tx.type === 'payout' ? (isDark ? 'text-slate-300' : 'text-slate-700') : 'text-emerald-500'
-                  }`}>
-                    {tx.type === 'payout' ? `-$${tx.amount.toFixed(4)}` : `+$${tx.amount.toFixed(4)}`}
-                  </td>
+        {/* View 1: Transaction Ledger Table */}
+        {activeTab === 'transactions' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className={`border-b ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                  <th className="pb-2 font-medium">Type</th>
+                  <th className="pb-2 font-medium">Batch / Reference</th>
+                  <th className="pb-2 font-medium">Time</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium text-right">Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
+                {transactions.slice(0, 6).map((tx) => (
+                  <tr key={tx.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/30 text-slate-300' : 'hover:bg-slate-50 text-slate-700'}`}>
+                    <td className="py-2.5">
+                      <span className={`inline-flex items-center gap-1 font-medium ${
+                        tx.type === 'batch_revenue' ? 'text-emerald-500' : tx.type === 'payout' ? 'text-blue-500' : 'text-amber-500'
+                      }`}>
+                        {tx.type === 'batch_revenue' ? 'Batch Revenue' : tx.type === 'payout' ? 'Payout Sent' : 'Bonus'}
+                      </span>
+                    </td>
+                    <td className={`py-2.5 font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {tx.batchNumber ? `Batch #${tx.batchNumber} (10 Ads)` : tx.referenceCode}
+                    </td>
+                    <td className={`py-2.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </td>
+                    <td className="py-2.5">
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                        {tx.status}
+                      </span>
+                    </td>
+                    <td className={`py-2.5 font-mono font-semibold text-right ${
+                      tx.type === 'payout' ? (isDark ? 'text-slate-300' : 'text-slate-700') : 'text-emerald-500'
+                    }`}>
+                      {tx.type === 'payout' ? `-$${tx.amount.toFixed(4)}` : `+$${tx.amount.toFixed(4)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* View 2: Saved Survey Responses List */}
+        {activeTab === 'surveys' && (
+          <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+            {surveyResponses.length === 0 ? (
+              <div className={`p-6 text-center text-xs rounded-xl border ${
+                isDark ? 'bg-slate-950/40 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-500'
+              }`}>
+                No survey responses recorded yet. Responses will save here in local storage as ads finish!
+              </div>
+            ) : (
+              surveyResponses.map((res) => (
+                <div
+                  key={res.id}
+                  className={`p-3 rounded-xl border text-xs space-y-1.5 transition-colors ${
+                    isDark ? 'bg-slate-950/60 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      {res.adBrand}
+                    </span>
+                    <span className="font-mono text-emerald-500 font-bold">
+                      +${res.creditedAmount.toFixed(4)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[11px] pt-1 border-t border-slate-800/40">
+                    <div>
+                      <span className="text-slate-500">Impression: </span>
+                      <span className="font-medium">{res.answers.question1}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Buy Intent: </span>
+                      <span className="font-medium">{res.answers.question2}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Relevance: </span>
+                      <span className="font-medium">{res.answers.question3}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-slate-500 pt-1">
+                    <span>Ad ID: {res.adId}</span>
+                    <span>{new Date(res.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Request Payout Modal */}

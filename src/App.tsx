@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   AdCreative, BatchProgress, BatchSettings, AccountProfile, 
-  Transaction, DurationMode, ThemeMode 
+  Transaction, DurationMode, ThemeMode, SurveyAnswers, SurveyResponse 
 } from './types';
 import { AD_CATALOG } from './data/mockAds';
 import { playCoinSound, playBatchCompletedFanfare } from './utils/audio';
+import { surveyService } from './services/surveyService';
 import { Navbar } from './components/Navbar';
 import { AdPlayer } from './components/AdPlayer';
 import { BatchController } from './components/BatchController';
@@ -88,17 +89,23 @@ export default function App() {
     return DEFAULT_PROFILE;
   });
 
-  // Settings
+  // Settings: default 5-second ad pacing as required
   const [settings, setSettings] = useState<BatchSettings>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...parsed,
+          durationMode: parsed.durationMode || 'speed_5s',
+        };
+      }
     } catch {
       // ignore
     }
     return {
       batchSize: 10,
-      durationMode: 'standard_10s',
+      durationMode: 'speed_5s', // 5-second ad default
       autoContinueNextBatch: true,
       soundEnabled: true,
       complianceGuard: true,
@@ -135,19 +142,19 @@ export default function App() {
       case 'speed_5s': return 5;
       case 'standard_10s': return 8;
       case 'full_15s': return 15;
-      default: return 8;
+      default: return 5;
     }
   }, []);
 
-  // Batch playback progress state
+  // Batch playback progress state: starts auto-playing the 5-second ad
   const [batchProgress, setBatchProgress] = useState<BatchProgress>({
     batchId: 3,
     currentAdIndex: 0,
     totalAdsInBatch: 10,
-    isPlaying: true, // starts auto-playing directly as requested
+    isPlaying: true,
     isPaused: false,
-    secondsLeft: 8,
-    totalDuration: 8,
+    secondsLeft: 5,
+    totalDuration: 5,
     progressPercent: 0,
     batchEarned: 0,
     completedInCurrentBatch: 0,
@@ -202,15 +209,53 @@ export default function App() {
   const currentAdIndex = batchProgress.currentAdIndex;
   const currentAd: AdCreative = AD_CATALOG[currentAdIndex % AD_CATALOG.length];
 
-  // Ad Completion / Advancement Handler
-  const handleCompleteCurrentAd = useCallback(() => {
+  // 1. When the 5-second ad finishes: Transition to SurveyStep BEFORE crediting any reward
+  const handleAdFinishedTransitionToSurvey = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    elapsedMsRef.current = 0;
+
+    setBatchProgress(prev => ({
+      ...prev,
+      status: 'survey',
+      progressPercent: 100,
+      secondsLeft: 0,
+    }));
+  }, []);
+
+  // 2. When the user submits all 3 questions on the SurveyStep:
+  //    - Save survey response to localStorage (backend-swappable)
+  //    - Credit reward to user account
+  //    - Advance to next ad and automatically start playback in continuous loop
+  const handleSurveySubmittedAndClaimReward = useCallback(async (answers: SurveyAnswers) => {
     const ad = AD_CATALOG[batchProgress.currentAdIndex % AD_CATALOG.length];
     const impressionRevenue = ad.cpm / 1000;
+
+    // Save survey response to local storage
+    const responsePayload: SurveyResponse = {
+      id: `survey-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      adId: ad.id,
+      adBrand: ad.brand,
+      adHeadline: ad.headline,
+      category: ad.category,
+      answers,
+      timestamp: Date.now(),
+      creditedAmount: impressionRevenue,
+      accountEmail: profile.accountEmail,
+    };
+
+    try {
+      await surveyService.saveSurveyResponse(responsePayload);
+    } catch (err) {
+      console.error('Error saving survey response:', err);
+    }
 
     // Play coin sound
     playCoinSound(settings.soundEnabled);
 
-    // Update financial profile
+    // Credit reward to publisher account
     setProfile(prev => {
       const newBalance = prev.currentBalance + impressionRevenue;
       const newLifetime = prev.lifetimeEarnings + impressionRevenue;
@@ -226,10 +271,16 @@ export default function App() {
     const isLastAdInBatch = batchProgress.currentAdIndex + 1 >= batchProgress.totalAdsInBatch;
 
     if (!isLastAdInBatch) {
-      // Advance to next ad in this batch
+      // Advance to next ad in this batch and start playing automatically
       const nextIndex = batchProgress.currentAdIndex + 1;
       const dur = getAdDurationSec(settings.durationMode);
       elapsedMsRef.current = 0;
+
+      setToastMessage({
+        title: `Reward Credited: +$${impressionRevenue.toFixed(4)}`,
+        subtitle: `Survey verified for ${ad.brand}. Starting next ad...`,
+      });
+
       setBatchProgress(prev => ({
         ...prev,
         currentAdIndex: nextIndex,
@@ -238,6 +289,9 @@ export default function App() {
         secondsLeft: dur,
         totalDuration: dur,
         progressPercent: 0,
+        isPlaying: true,
+        isPaused: false,
+        status: 'playing', // Loop automatically to next ad
       }));
     } else {
       // Completed all 10 ads in this batch!
@@ -263,7 +317,7 @@ export default function App() {
         type: 'batch_revenue',
         amount: totalBatchEarned,
         timestamp: Date.now(),
-        description: `Batch #${completedBatchId} (10/10 Impressions Verified)`,
+        description: `Batch #${completedBatchId} (10/10 Verified & Surveyed)`,
         batchNumber: completedBatchId,
         impressions: 10,
         status: 'completed',
@@ -283,7 +337,7 @@ export default function App() {
       });
 
       if (settings.autoContinueNextBatch) {
-        // Intermission of 2 seconds, then start next batch
+        // Intermission of 2 seconds, then start next batch automatically
         setBatchProgress(prev => ({
           ...prev,
           completedInCurrentBatch: 10,
@@ -310,7 +364,7 @@ export default function App() {
             progressPercent: 0,
             batchEarned: 0,
             completedInCurrentBatch: 0,
-            status: 'playing',
+            status: 'playing', // Starts playing Batch N+1 Ad 1 automatically
           });
         }, settings.breakBetweenBatchesSec * 1000);
       } else {
@@ -339,7 +393,7 @@ export default function App() {
     settings.breakBetweenBatchesSec
   ]);
 
-  // Main Autoplay Timer Loop
+  // Main Autoplay Timer Loop: runs during 'playing' status
   useEffect(() => {
     const isPlaybackBlocked = settings.complianceGuard && isTabHidden;
 
@@ -367,8 +421,9 @@ export default function App() {
         secondsLeft: remainingSec,
       }));
 
+      // When 5-second ad reaches end, trigger SurveyStep
       if (currentElapsed >= totalMs) {
-        handleCompleteCurrentAd();
+        handleAdFinishedTransitionToSurvey();
       }
     }, intervalTickMs);
 
@@ -386,7 +441,7 @@ export default function App() {
     settings.durationMode, 
     isTabHidden, 
     getAdDurationSec, 
-    handleCompleteCurrentAd
+    handleAdFinishedTransitionToSurvey
   ]);
 
   // Control Actions
@@ -401,8 +456,8 @@ export default function App() {
     });
   };
 
-  const handleSkipCurrentAd = () => {
-    handleCompleteCurrentAd();
+  const handleSkipCurrentAdToSurvey = () => {
+    handleAdFinishedTransitionToSurvey();
   };
 
   const handleRestartBatch = () => {
@@ -508,7 +563,7 @@ export default function App() {
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'
     }`}>
-      {/* Top Navigation */}
+      {/* Top Navigation with Persistent Balance & Theme Switcher */}
       <Navbar
         currentBalance={profile.currentBalance}
         accountEmail={profile.accountEmail}
@@ -556,13 +611,14 @@ export default function App() {
               ad={currentAd}
               batchProgress={batchProgress}
               onTogglePlay={handleTogglePlay}
-              onSkipAd={handleSkipCurrentAd}
+              onSkipAd={handleSkipCurrentAdToSurvey}
               soundEnabled={settings.soundEnabled}
               onToggleSound={() => handleUpdateSettings({ soundEnabled: !settings.soundEnabled })}
               isTabHidden={isTabHidden}
               complianceGuard={settings.complianceGuard}
               accountEmail={profile.accountEmail}
               theme={theme}
+              onSubmitSurvey={handleSurveySubmittedAndClaimReward}
             />
 
             {/* Batch Controller (10-ad step bar & pacing controls) */}
@@ -606,7 +662,7 @@ export default function App() {
       }`}>
         <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            Ad Revenue Batch Autoplayer • Running in 10-Ad Continuous Cycle Mode
+            Adstream Automator • Continuous Loop: 5s Ad → Survey → Reward → Next Ad
           </div>
           <div className={`font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
             Publisher: {profile.publisherId} • Target: {profile.accountEmail}

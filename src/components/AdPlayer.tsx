@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AdCreative, BatchProgress, ThemeMode } from '../types';
+import { AdCreative, BatchProgress, ThemeMode, SurveyAnswers } from '../types';
 import { AdVisualStage } from './AdVisualStage';
+import { SurveyStep } from './SurveyStep';
 import { 
   Play, Pause, FastForward, ExternalLink, ShieldCheck, 
   Volume2, VolumeX, DollarSign, AlertTriangle 
@@ -17,6 +18,7 @@ interface AdPlayerProps {
   complianceGuard: boolean;
   accountEmail: string;
   theme?: ThemeMode;
+  onSubmitSurvey: (answers: SurveyAnswers) => void;
 }
 
 export const AdPlayer: React.FC<AdPlayerProps> = ({
@@ -30,10 +32,12 @@ export const AdPlayer: React.FC<AdPlayerProps> = ({
   complianceGuard,
   accountEmail,
   theme = 'dark',
+  onSubmitSurvey,
 }) => {
   const [showOfferModal, setShowOfferModal] = useState(false);
   const impressionValue = ad.cpm / 1000;
   const isDark = theme === 'dark';
+  const isSurveyActive = batchProgress.status === 'survey';
 
   return (
     <div className={`rounded-3xl p-5 sm:p-7 shadow-2xl backdrop-blur-xl relative flex flex-col transition-colors duration-200 border ${
@@ -41,7 +45,7 @@ export const AdPlayer: React.FC<AdPlayerProps> = ({
         ? 'bg-slate-900/90 border-slate-800 text-white' 
         : 'bg-white border-slate-200 text-slate-900 shadow-slate-200/50'
     }`}>
-      {/* Top Header: Batch Counter & Payout Destination */}
+      {/* Persistent Top Header Banner (Kept exactly as it works now) */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border border-blue-500/30 text-blue-500 font-semibold text-sm">
@@ -57,6 +61,12 @@ export const AdPlayer: React.FC<AdPlayerProps> = ({
             <span>Format:</span>
             <strong className={isDark ? 'text-slate-200' : 'text-slate-900'}>{ad.format}</strong>
           </span>
+
+          {isSurveyActive && (
+            <span className="text-xs inline-flex items-center gap-1 bg-amber-500/20 text-amber-500 border border-amber-500/30 px-2 py-0.5 rounded-md font-semibold animate-pulse">
+              Survey Pending
+            </span>
+          )}
         </div>
 
         {/* Target Crediting Account Pill */}
@@ -75,135 +85,150 @@ export const AdPlayer: React.FC<AdPlayerProps> = ({
         </div>
       </div>
 
-      {/* Main Video Ad Screen Frame */}
-      <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-        <AdVisualStage 
-          ad={ad} 
-          isPlaying={batchProgress.isPlaying && !(complianceGuard && isTabHidden)}
-          progressPercent={batchProgress.progressPercent}
-        />
-
-        {/* Tab Hidden Compliance Overlay (Paused to protect from IVT) */}
-        {complianceGuard && isTabHidden && (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30">
-            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-3">
-              <AlertTriangle className="w-7 h-7" />
-            </div>
-            <h4 className="text-lg font-bold text-white mb-1">Playback Paused (Viewability Guard)</h4>
-            <p className="text-sm text-slate-300 max-w-md">
-              Window focus lost. In accordance with IAB & Ad Network Anti-Fraud policies, autoplay is paused to ensure 100% genuine viewable impressions.
-            </p>
-            <span className="mt-3 text-xs text-amber-400/90 font-mono bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-500/20">
-              Return to tab to resume batch revenue generation
-            </span>
-          </div>
-        )}
-
-        {/* Floating Screen Badges: Countdown Ring & Sound */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-          {/* Sound Toggle */}
-          <button
-            id="toggle-ad-sound-btn"
-            onClick={onToggleSound}
-            aria-label="Toggle Ad Audio"
-            className="w-9 h-9 rounded-xl bg-black/60 backdrop-blur-md text-white/90 hover:text-white hover:bg-black/80 flex items-center justify-center border border-white/10 transition-colors"
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
-          </button>
-
-          {/* Countdown timer badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-white/15 text-white font-mono text-sm font-semibold shadow-lg">
-            <span className="text-amber-400">{batchProgress.secondsLeft}s</span>
-          </div>
+      {/* Main Screen Content: SurveyStep when ad finishes, or Video Ad Stage during 5s playback */}
+      {isSurveyActive ? (
+        <div className="animate-in fade-in zoom-in-95 duration-200">
+          <SurveyStep
+            ad={ad}
+            rewardAmount={impressionValue}
+            accountEmail={accountEmail}
+            theme={theme}
+            onSubmitSurvey={onSubmitSurvey}
+          />
         </div>
+      ) : (
+        <>
+          {/* Main Video Ad Screen Frame */}
+          <div className="relative rounded-2xl overflow-hidden shadow-2xl">
+            <AdVisualStage 
+              ad={ad} 
+              isPlaying={batchProgress.isPlaying && !(complianceGuard && isTabHidden)}
+              progressPercent={batchProgress.progressPercent}
+            />
 
-        {/* Floating Impression Value Badge */}
-        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-xs font-semibold shadow-lg">
-          <DollarSign className="w-3.5 h-3.5" />
-          <span>+${impressionValue.toFixed(4)} on finish</span>
-        </div>
-      </div>
-
-      {/* Ad Controls Bar */}
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-        {/* Play/Pause & Skip */}
-        <div className="flex items-center gap-3">
-          <button
-            id="play-pause-batch-btn"
-            onClick={onTogglePlay}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-semibold text-sm transition-all shadow-lg shadow-blue-600/30"
-          >
-            {batchProgress.isPlaying ? (
-              <>
-                <Pause className="w-4 h-4" />
-                <span>Pause Batch</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-white" />
-                <span>Resume Batch</span>
-              </>
+            {/* Tab Hidden Compliance Overlay (Paused to protect from IVT) */}
+            {complianceGuard && isTabHidden && (
+              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-3">
+                  <AlertTriangle className="w-7 h-7" />
+                </div>
+                <h4 className="text-lg font-bold text-white mb-1">Playback Paused (Viewability Guard)</h4>
+                <p className="text-sm text-slate-300 max-w-md">
+                  Window focus lost. In accordance with IAB & Ad Network Anti-Fraud policies, autoplay is paused to ensure 100% genuine viewable impressions.
+                </p>
+                <span className="mt-3 text-xs text-amber-400/90 font-mono bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-500/20">
+                  Return to tab to resume batch revenue generation
+                </span>
+              </div>
             )}
-          </button>
 
-          <button
-            id="skip-current-ad-btn"
-            onClick={onSkipAd}
-            className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl border font-medium text-sm transition-all active:scale-95 ${
-              isDark 
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700/80' 
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-            }`}
-            title="Advance to next ad in batch"
-          >
-            <FastForward className={`w-4 h-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`} />
-            <span>Next Ad</span>
-          </button>
-        </div>
+            {/* Floating Screen Badges: Countdown Ring & Sound */}
+            <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+              {/* Sound Toggle */}
+              <button
+                id="toggle-ad-sound-btn"
+                onClick={onToggleSound}
+                aria-label="Toggle Ad Audio"
+                className="w-9 h-9 rounded-xl bg-black/60 backdrop-blur-md text-white/90 hover:text-white hover:bg-black/80 flex items-center justify-center border border-white/10 transition-colors"
+              >
+                {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+              </button>
 
-        {/* Sponsor CTA / Interactive Visit Button */}
-        <div className="flex items-center gap-3">
-          <button
-            id="visit-sponsor-cta-btn"
-            onClick={() => setShowOfferModal(true)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all group ${
-              isDark 
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' 
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-            }`}
-          >
-            <ExternalLink className="w-4 h-4 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
-            <span>{ad.ctaText}</span>
-          </button>
-        </div>
-      </div>
+              {/* Countdown timer badge */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-white/15 text-white font-mono text-sm font-semibold shadow-lg">
+                <span className="text-amber-400">{batchProgress.secondsLeft}s</span>
+              </div>
+            </div>
 
-      {/* Real-time Tracking Pixel / VAST Telemetry Feed */}
-      <div className={`mt-5 pt-4 border-t flex flex-wrap items-center justify-between text-xs gap-2 ${
-        isDark ? 'border-slate-800/80 text-slate-400' : 'border-slate-200 text-slate-600'
-      }`}>
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          <span>VAST 4.2 Telemetry:</span>
-          <span className={`font-mono font-medium ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>
-            {batchProgress.progressPercent >= 100
-              ? 'Complete (Impression Credited)'
-              : batchProgress.progressPercent >= 75
-              ? 'Quartile 3 (75% Verified)'
-              : batchProgress.progressPercent >= 50
-              ? 'Midpoint (50% Verified)'
-              : batchProgress.progressPercent >= 25
-              ? 'Quartile 1 (25% Verified)'
-              : 'Impression Started'}
-          </span>
-        </div>
+            {/* Floating Impression Value Badge */}
+            <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-xs font-semibold shadow-lg">
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>+${impressionValue.toFixed(4)} pending survey</span>
+            </div>
+          </div>
 
-        <div className="flex items-center gap-3 font-mono">
-          <span>CPM Rate: <strong className={isDark ? 'text-white' : 'text-slate-900'}>${ad.cpm.toFixed(2)}</strong></span>
-          <span>•</span>
-          <span>Batch Progress: <strong className="text-blue-500">{batchProgress.currentAdIndex + 1}/10</strong></span>
-        </div>
-      </div>
+          {/* Ad Controls Bar */}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+            {/* Play/Pause & Skip */}
+            <div className="flex items-center gap-3">
+              <button
+                id="play-pause-batch-btn"
+                onClick={onTogglePlay}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-semibold text-sm transition-all shadow-lg shadow-blue-600/30"
+              >
+                {batchProgress.isPlaying ? (
+                  <>
+                    <Pause className="w-4 h-4" />
+                    <span>Pause Batch</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Resume Batch</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                id="skip-current-ad-btn"
+                onClick={onSkipAd}
+                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl border font-medium text-sm transition-all active:scale-95 ${
+                  isDark 
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700/80' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                }`}
+                title="Advance to survey and claim reward"
+              >
+                <FastForward className={`w-4 h-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`} />
+                <span>Skip to Survey</span>
+              </button>
+            </div>
+
+            {/* Sponsor CTA / Interactive Visit Button */}
+            <div className="flex items-center gap-3">
+              <button
+                id="visit-sponsor-cta-btn"
+                onClick={() => setShowOfferModal(true)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all group ${
+                  isDark 
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                }`}
+              >
+                <ExternalLink className="w-4 h-4 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+                <span>{ad.ctaText}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Real-time Tracking Pixel / VAST Telemetry Feed */}
+          <div className={`mt-5 pt-4 border-t flex flex-wrap items-center justify-between text-xs gap-2 ${
+            isDark ? 'border-slate-800/80 text-slate-400' : 'border-slate-200 text-slate-600'
+          }`}>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span>VAST 4.2 Telemetry:</span>
+              <span className={`font-mono font-medium ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>
+                {batchProgress.progressPercent >= 100
+                  ? 'Complete (Awaiting Survey)'
+                  : batchProgress.progressPercent >= 75
+                  ? 'Quartile 3 (75% Verified)'
+                  : batchProgress.progressPercent >= 50
+                  ? 'Midpoint (50% Verified)'
+                  : batchProgress.progressPercent >= 25
+                  ? 'Quartile 1 (25% Verified)'
+                  : 'Impression Started (5s Ad)'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 font-mono">
+              <span>CPM Rate: <strong className={isDark ? 'text-white' : 'text-slate-900'}>${ad.cpm.toFixed(2)}</strong></span>
+              <span>•</span>
+              <span>Batch Progress: <strong className="text-blue-500">{batchProgress.currentAdIndex + 1}/10</strong></span>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Simulated Sponsor Landing Modal */}
       {showOfferModal && (
